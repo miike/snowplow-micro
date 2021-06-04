@@ -12,6 +12,16 @@
               "uri": "http://iglucentral.com"
             }
           }
+        },
+        {
+          "name": "Embedded Iglu repository",
+          "priority": 5,
+          "vendorPrefixes": ["com.example" ],
+          "connection": {
+            "embedded": {
+              "path": ""
+            }
+          }
         }
       ]
     }
