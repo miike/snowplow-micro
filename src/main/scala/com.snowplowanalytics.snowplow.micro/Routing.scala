@@ -14,6 +14,7 @@ package com.snowplowanalytics.snowplow.micro
 
 import akka.http.scaladsl.server.Route
 import akka.http.scaladsl.server.Directives._
+import akka.http.scaladsl.model.StatusCodes.NotFound
 
 import io.circe.generic.auto._
 
@@ -38,7 +39,8 @@ private[micro] object Routing {
     */
   def getMicroRoutes(
       collectorConf: CollectorConfig,
-      collectorSinks: CollectorSinks
+      collectorSinks: CollectorSinks,
+      igluService: IgluService
   ): Route = {
     val collectorRoutes = new CollectorRoute {
       override def collectorService =
@@ -69,11 +71,18 @@ private[micro] object Routing {
             complete(ValidationCache.filterBad(filters))
           }
         } 
+      } ~ pathPrefix("iglu") {
+        path(Segment / Segment / "jsonschema" / Segment) {
+          igluService.get(_, _, _)
+        } ~ {
+          complete(NotFound, "Schema lookup should be in format iglu/{vendor}/{schemaName}/jsonschema/{model}-{revision}-{addition}")
+        }
       } ~ {
-        complete("Path for micro has to be one of: /all /good /bad /reset")
+        complete(NotFound, "Path for micro has to be one of: /all /good /bad /reset /iglu")
       }
     }
 
     microRoutes ~ collectorRoutes
   }
+
 }
