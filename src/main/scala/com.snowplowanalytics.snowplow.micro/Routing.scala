@@ -42,6 +42,9 @@ final class Routing(igluResolver: Resolver[IO])
           Ok(ValidationCache.getSummary())
         case (GET, "good") =>
           Ok(ValidationCache.filterGood(FiltersGood(None, None, None, None)))
+        case (GET, "goodf") =>
+          val filterOpt = request.uri.query.params.get("filter")
+          Ok(ValidationCache.filterSQL(filterOpt))
         case (POST, "good") =>
           request.as[FiltersGood].flatMap { filters =>
             Ok(ValidationCache.filterGood(filters).asJson)

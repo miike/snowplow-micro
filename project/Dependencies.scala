@@ -31,6 +31,7 @@ object Dependencies {
 
     // force versions of transitive dependencies
     val badRows   = "2.2.0"
+    val duckDb    = "1.0.0"
   }
 
   val snowplowStreamCollector = "com.snowplowanalytics" %% "snowplow-stream-collector-http4s-core" % V.snowplowStreamCollector 
@@ -49,4 +50,7 @@ object Dependencies {
 
   // transitive
   val badRows          = "com.snowplowanalytics"           %% "snowplow-badrows"        % V.badRows
+
+  // duckdb
+  val duckDb      =   "org.duckdb" % "duckdb_jdbc" % V.duckDb
 }

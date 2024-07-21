@@ -15,6 +15,20 @@ package com.snowplowanalytics.snowplow.micro
   * so that they can be quickly filtered.
   * Bad events are stored with the error message(s) describing what when wrong.
   */
+
+import com.snowplowanalytics.snowplow.analytics.scalasdk.Event
+import java.sql.{DriverManager}
+import io.circe.syntax._
+import io.circe.parser._
+import scala.collection.mutable.ListBuffer
+import io.circe.{ Decoder }
+import java.time.Instant
+import scala.util.Try
+import io.circe.generic.semiauto.deriveDecoder
+import java.time.{LocalDateTime, ZoneId, Instant}
+import java.time.format.DateTimeFormatter
+import scala.util.Try
+
 private[micro] trait ValidationCache {
   import ValidationCache._
 
@@ -22,6 +36,23 @@ private[micro] trait ValidationCache {
   private object LockGood
   protected var bad: List[BadEvent]
   private object LockBad
+
+  val conn = DriverManager.getConnection("jdbc:duckdb:")
+
+  implicit val decodeInstant: Decoder[Instant] = Decoder.decodeString.emapTry { str =>
+    val formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")
+    Try {
+      Try(Instant.parse(str)) // First, try parsing the string as an Instant directly.
+        .getOrElse {
+          // If the direct parsing fails, try parsing it as a LocalDateTime with a custom formatter.
+          val localDateTime = LocalDateTime.parse(str, formatter)
+          // Convert LocalDateTime to Instant using the system's default time zone.
+          // You might want to specify a specific time zone if the default is not appropriate.
+          localDateTime.atZone(ZoneId.systemDefault()).toInstant
+        }
+    }
+  }
+
 
   /** Compute a summary with the number of good and bad events currently in cache. */
   private[micro] def getSummary(): ValidationSummary = {
@@ -38,6 +69,33 @@ private[micro] trait ValidationCache {
   private[micro] def addToGood(events: List[GoodEvent]): Unit =
     LockGood.synchronized {
       good = events ++ good
+
+      // convert events into a json representation
+      val x = events.map(_.event.toJson(false))
+      println(events.map(_.event.asJson))
+      println(x)
+
+      println(x)
+      // add an event to duckdb?
+      val stmt = conn.createStatement();
+      // note rawevent is missing because I do not care about it.
+       stmt.execute("CREATE TABLE IF NOT EXISTS good (event_type VARCHAR, schema VARCHAR, contexts VARCHAR[], event STRUCT(app_id VARCHAR, collector_tstamp TIMESTAMP, event_id VARCHAR, v_collector VARCHAR, v_etl VARCHAR))")
+      stmt.close()
+
+
+      var insertstmt = conn.prepareStatement("INSERT INTO good VALUES ('test', 'test', ARRAY['test'], ROW(?, ?, ?, ?, ?));")
+      // a row with the values?
+      events.headOption.foreach { firstEvent =>
+        insertstmt.setString(1, firstEvent.event.app_id.getOrElse(null))
+        insertstmt.setString(2, "2024-01-01T00:00:00.000Z")
+        insertstmt.setString(3, "123")
+        insertstmt.setString(4, "123")
+        insertstmt.setString(5, "123")
+      }
+      insertstmt.execute()
+      insertstmt.close()
+
+
     }
 
   /** Add a bad event to the cache. */
@@ -45,6 +103,8 @@ private[micro] trait ValidationCache {
     LockBad.synchronized {
       bad = events ++ bad
     }
+
+
 
   /** Remove all the events from memory. */
   private[micro] def reset(): Unit = {
@@ -56,14 +116,53 @@ private[micro] trait ValidationCache {
     }
   }
 
+  private [micro] def filterSQL(query: Option[String] = None): List[Event] = {
+    implicit val eventDecoder: Decoder[Event] = deriveDecoder[Event]
+    val stmt = conn.createStatement()
+    println("filter recv:", query)
+    val result = stmt.executeQuery("SELECT TO_JSON(event) FROM good")
+
+    val goodEventsBuffer = ListBuffer[Event]()
+    // define a new list of strings
+    while (result.next()) {
+      val o = result.getString(1) // might need to decode here?
+      // val x = parse(o)
+      val x = decode[Event](o)
+      println("parsed:", x)
+      x match {
+        // case Right(Event(_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_,_)) => {
+        case Right(event) => {
+          println("success:")
+          goodEventsBuffer += event
+        }
+        case Left(error) => {
+          println("error:", error)
+        }
+
+    }
+      // append to goodEvents
+      
+    }
+    stmt.close()
+    goodEventsBuffer.toList // this ends up getting double encoded (which is not ideal)
+  }
+
   /** Filter out the good events with the possible filters contained in the HTTP request. */
   private[micro] def filterGood(
     filtersGood: FiltersGood = FiltersGood(None, None, None, None)
-  ): List[GoodEvent] =
+  ): List[GoodEvent] = {
+
     LockGood.synchronized {
+      // allow any combination of filters here
+
       val filtered = good.filter(keepGoodEvent(_, filtersGood))
       filtered.take(filtersGood.limit.getOrElse(filtered.size))
     }
+
+    // I don't know how a list of filtered good events becomes a JSON object?
+
+  }
+
 
   /** Filter out the bad events with the possible filters contained in the HTTP request. */
   private[micro] def filterBad(
